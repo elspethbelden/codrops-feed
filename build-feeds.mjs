@@ -3,7 +3,8 @@
 //
 // feeds.json: [{ "slug": "codrops", "name": "Codrops", "site": "https://tympanus.net/codrops",
 //                "output": "feed.xml", "perPage": 30, "categories": "12,34", "tags": "" }]
-// Only slug, name and site are required. output defaults to "<slug>.xml".
+// Only slug and site are required. site can be any page on the site; the WordPress base is found
+// automatically. name defaults to the site's own name. output defaults to "<slug>.xml".
 
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -33,26 +34,39 @@ async function getJson(url) {
   return data;
 }
 
-// Pretty-permalink route first, then the query-string route for sites without it.
-async function fetchPosts(feed) {
-  const site = feed.site.replace(/\/$/, "");
+// Find the WordPress install behind any pasted link: try the link itself, then walk up its path.
+// Returns { base, route, name } where route is "pretty" (/wp-json/) or "query" (?rest_route=).
+async function resolveSite(feed) {
+  const u = new URL(feed.site);
+  const parts = u.pathname.split("/").filter(Boolean).slice(0, 4);
+  const bases = [];
+  for (let i = parts.length; i >= 0; i--) bases.push(u.origin + (i ? "/" + parts.slice(0, i).join("/") : ""));
+  for (const base of bases) {
+    for (const [route, url] of [["pretty", `${base}/wp-json/`], ["query", `${base}/?rest_route=/`]]) {
+      try {
+        const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" } });
+        if (!res.ok) continue;
+        const root = await res.json();
+        if (Array.isArray(root?.namespaces) && root.namespaces.includes("wp/v2")) {
+          return { base, route, name: decode(root.name || "").trim() || u.hostname.replace(/^www\./, "") };
+        }
+      } catch {}
+    }
+  }
+  const e = new Error("No WordPress API found at this address");
+  e.code = "not_wordpress";
+  throw e;
+}
+
+async function fetchPosts(feed, site) {
   const q = new URLSearchParams({ per_page: String(feed.perPage || 30), _embed: "author,wp:featuredmedia" });
   if (feed.categories) q.set("categories", feed.categories);
   if (feed.tags) q.set("tags", feed.tags);
-  const routes = [`${site}/wp-json/wp/v2/posts?${q}`, `${site}/?rest_route=/wp/v2/posts&${q}`];
-  let lastErr;
-  for (const url of routes) {
-    try {
-      return await getJson(url);
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr;
+  const url = site.route === "pretty" ? `${site.base}/wp-json/wp/v2/posts?${q}` : `${site.base}/?rest_route=/wp/v2/posts&${q}`;
+  return getJson(url);
 }
 
-function toXml(feed, posts, selfUrl) {
-  const site = feed.site.replace(/\/$/, "");
+function toXml(feed, posts, selfUrl, site) {
   const seen = new Set();
   const items = posts
     .filter((p) => {
@@ -86,9 +100,9 @@ function toXml(feed, posts, selfUrl) {
     xml: `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
-    <title>${esc(feed.name)}</title>
-    <link>${esc(site)}/</link>
-    <description>${esc(feed.name)} posts, rebuilt from the WordPress API.</description>
+    <title>${esc(site.name)}</title>
+    <link>${esc(site.base)}/</link>
+    <description>${esc(site.name)} posts, rebuilt from the WordPress API.</description>
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
 ${selfUrl ? `    <atom:link href="${esc(selfUrl)}" rel="self" type="application/rss+xml" />\n` : ""}${items.join("\n")}
   </channel>
@@ -98,12 +112,18 @@ ${selfUrl ? `    <atom:link href="${esc(selfUrl)}" rel="self" type="application/
 }
 
 // If a site is down, republish the copy that is already live so its URL doesn't 404.
+// Returns "kept", "none" (never published, nothing to protect) or "unknown" (couldn't check).
 async function keepLiveCopy(output) {
-  if (!PAGES_BASE) return false;
-  const res = await fetch(`${PAGES_BASE}/${output}`, { headers: { "User-Agent": UA } });
-  if (!res.ok) return false;
-  await writeFile(`public/${output}`, await res.text());
-  return true;
+  if (!PAGES_BASE) return "unknown";
+  try {
+    const res = await fetch(`${PAGES_BASE}/${output}`, { headers: { "User-Agent": UA } });
+    if (res.status === 404) return "none";
+    if (!res.ok) return "unknown";
+    await writeFile(`public/${output}`, await res.text());
+    return "kept";
+  } catch {
+    return "unknown";
+  }
 }
 
 async function main() {
@@ -115,28 +135,31 @@ async function main() {
   for (const feed of feeds) {
     const output = feed.output || `${feed.slug}.xml`;
     const selfUrl = PAGES_BASE ? `${PAGES_BASE}/${output}` : "";
+    const row = { slug: feed.slug, name: feed.name || feed.slug, site: feed.site, file: output };
     try {
-      const { xml, count } = toXml(feed, await fetchPosts(feed), selfUrl);
-      if (!count) throw new Error("no usable posts");
+      const site = await resolveSite(feed);
+      if (feed.name) site.name = feed.name; // an explicit name in feeds.json wins
+      const { xml, count } = toXml(feed, await fetchPosts(feed, site), selfUrl, site);
+      if (!count) throw Object.assign(new Error("The site's API returned no posts"), { code: "no_posts" });
       await writeFile(`public/${output}`, xml);
-      console.log(`✓ ${feed.slug}: ${count} items -> ${output}`);
-      rows.push({ feed, output, ok: true });
+      console.log(`✓ ${feed.slug}: ${count} items from ${site.base} -> ${output}`);
+      rows.push({ ...row, name: site.name, site: site.base, status: "ok", items: count });
     } catch (err) {
-      const kept = await keepLiveCopy(output).catch(() => false);
-      console.error(`✗ ${feed.slug}: ${err.message}${kept ? " (kept previous copy)" : ""}`);
-      if (kept) rows.push({ feed, output, ok: false });
+      const kept = await keepLiveCopy(output);
+      console.error(`✗ ${feed.slug}: ${err.message} (${kept})`);
+      if (kept === "kept") rows.push({ ...row, status: "stale", error: err.message });
+      else if (kept === "none") rows.push({ ...row, status: "failed", code: err.code || "error", error: err.message });
       else broken++;
     }
   }
 
   // Feed list for the feed-maker page, then the page itself from site/
-  const list = rows.map((r) => ({ name: r.feed.name, site: r.feed.site, file: r.output, fresh: r.ok }));
-  await writeFile("public/feeds.json", JSON.stringify(list, null, 2));
+  await writeFile("public/feeds.json", JSON.stringify(rows, null, 2));
   if (existsSync("site")) await cp("site", "public", { recursive: true });
 
-  // Stop the deploy rather than publish a site that has lost a feed.
+  // Couldn't tell whether a failing feed was already published: stop rather than risk dropping it.
   if (broken) {
-    console.error(`${broken} feed(s) failed with no previous copy; not deploying.`);
+    console.error(`${broken} feed(s) failed and their live copy couldn't be checked; not deploying.`);
     process.exit(1);
   }
 }
