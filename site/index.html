@@ -173,7 +173,7 @@ footer a { color: var(--muted); }
       Feed Maker
     </span>
     <h1>Paste a site. Get a feed.</h1>
-    <p class="lede">Works with any WordPress site, even when its own feed is broken. Feeds rebuild every hour from the site's API.</p>
+    <p class="lede">Paste any page from a WordPress site, even one whose own feed is broken. Feeds rebuild every hour from the site's API.</p>
   </header>
 
   <form id="form" novalidate>
@@ -293,20 +293,19 @@ footer a { color: var(--muted); }
   // ---------- Feed list (published by the build) ----------
   let published = [];
   async function loadFeeds() {
-    const ul = $("feeds");
     try { published = await getJson(`${PAGES}feeds.json?t=${Date.now()}`, { cache: "no-store" }); }
     catch { published = []; }
     renderFeeds();
   }
   function renderFeeds(extra = []) {
     const ul = $("feeds"); ul.replaceChildren();
-    const all = [...published, ...extra.filter((x) => !published.some((p) => p.file === x.file))];
+    const all = [...published, ...extra.filter((x) => !published.some((p) => p.file === x.file))].filter((f) => f.status !== "failed");
     if (!all.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "No feeds yet. Paste a site above to make the first one."; ul.append(li); return; }
     all.forEach((f) => {
       const li = document.createElement("li");
       const name = document.createElement("span"); name.className = "name"; name.textContent = f.name;
-      if (f.fresh === false) { const s = document.createElement("span"); s.className = "stale"; s.textContent = "Site unreachable, showing last copy"; name.append(s); }
-      if (f.pending) { const s = document.createElement("span"); s.className = "stale"; s.textContent = "Building"; name.append(s); }
+      const note = { stale: "Site unreachable, showing last copy", building: "Building", failed: "Couldn't build" }[f.status];
+      if (note) { const s = document.createElement("span"); s.className = "stale"; s.textContent = note; name.append(s); }
       const file = document.createElement("span"); file.className = "file"; file.textContent = PAGES + f.file;
       const btn = document.createElement("button"); btn.type = "button"; btn.className = "ghost"; btn.textContent = "Copy";
       btn.addEventListener("click", () => copyText(PAGES + f.file, btn));
@@ -336,7 +335,7 @@ footer a { color: var(--muted); }
   $("clearToken").addEventListener("click", () => { token = ""; store.clear(); renderConn("none", "Disconnected. The token is removed from this browser; delete it on GitHub too if you no longer need it."); });
   $("openConn").addEventListener("click", () => { $("conn").open = true; $("token").focus(); });
 
-  // ---------- Site detection ----------
+  // ---------- Site checks ----------
   // Platforms that already publish a feed at a predictable address.
   function knownFeed(u) {
     const h = u.hostname.replace(/^www\./, "");
@@ -347,35 +346,14 @@ footer a { color: var(--muted); }
     return null;
   }
 
-  // Walk up the pasted path until a WordPress API answers. Deepest first, so sub-sites like /codrops win.
-  async function findWordPress(u) {
-    const parts = u.pathname.split("/").filter(Boolean).slice(0, 4);
-    const bases = [];
-    for (let i = parts.length; i >= 0; i--) bases.push(u.origin + (i ? "/" + parts.slice(0, i).join("/") : ""));
-    for (const base of bases) {
-      for (const route of ["/wp-json/", "/?rest_route=/"]) {
-        try {
-          const root = await getJson(base + route, { headers: { Accept: "application/json" } });
-          if (Array.isArray(root.namespaces) && root.namespaces.includes("wp/v2")) {
-            const postsUrl = route === "/wp-json/" ? `${base}/wp-json/wp/v2/posts?per_page=1&_fields=title,date_gmt,link` : `${base}/?rest_route=/wp/v2/posts&per_page=1&_fields=title,date_gmt,link`;
-            let latest = null;
-            try { const p = await getJson(postsUrl); latest = p[0] || null; } catch {}
-            if (!latest) continue; // API answers but posts are hidden: not usable
-            return { base, name: decodeHtml(root.name || u.hostname).trim() || u.hostname, latest };
-          }
-        } catch {}
-      }
-    }
-    return null;
-  }
+  // A pasted link is already covered when it sits on or under a site that has a feed.
+  const covers = (site, pasted) => { const a = normSite(site), b = normSite(pasted); return b === a || b.startsWith(a + "/"); };
+  const findCovering = (list, pasted) => list.find((f) => f.status !== "failed" && covers(f.site, pasted));
 
-  function makeSlug(base, name, taken) {
-    const u = new URL(base);
-    const last = u.pathname.split("/").filter(Boolean).pop();
-    const fromHost = u.hostname.replace(/^(www|blog|news)\./, "").split(".")[0];
-    let slug = (last || fromHost || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "feed";
-    let s = slug, n = 2;
-    while (taken.has(s)) s = `${slug}-${n++}`;
+  function slugFor(u, taken) {
+    const base = u.hostname.replace(/^(www|blog|news)\./, "").split(".")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "feed";
+    let s = base, n = 2;
+    while (taken.has(s)) s = `${base}-${n++}`;
     return s;
   }
 
@@ -384,39 +362,61 @@ footer a { color: var(--muted); }
     const file = await getJson(`${API}/contents/feeds.json?ref=main`, { headers: gh(), cache: "no-store" });
     return { sha: file.sha, feeds: JSON.parse(b64decode(file.content)) };
   }
-  async function addFeed(entry) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  async function writeConfig(feeds, sha, message) {
+    const res = await fetch(`${API}/contents/feeds.json`, {
+      method: "PUT", headers: { ...gh(), "Content-Type": "application/json" },
+      body: JSON.stringify({ message, content: b64encode(JSON.stringify(feeds, null, 2) + "\n"), sha, branch: "main" }),
+    });
+    if (!res.ok) { const e = new Error(String(res.status)); e.status = res.status; throw e; }
+  }
+  async function addFeed(u) {
+    for (let attempt = 0; ; attempt++) {
       const { sha, feeds } = await readConfig();
-      const existing = feeds.find((f) => normSite(f.site) === normSite(entry.site));
+      const existing = feeds.find((f) => covers(f.site, u.href));
       if (existing) return { existing };
-      const taken = new Set(feeds.map((f) => f.slug));
-      entry.slug = makeSlug(entry.site, entry.name, taken);
-      feeds.push(entry);
-      const res = await fetch(`${API}/contents/feeds.json`, {
-        method: "PUT", headers: { ...gh(), "Content-Type": "application/json" },
-        body: JSON.stringify({ message: `Add ${entry.name} feed`, content: b64encode(JSON.stringify(feeds, null, 2) + "\n"), sha, branch: "main" }),
-      });
-      if (res.ok) return { added: entry };
-      if (res.status === 409 && attempt === 0) continue; // someone else changed the file; re-read and retry once
-      const e = new Error(String(res.status)); e.status = res.status; throw e;
+      const entry = { slug: slugFor(u, new Set(feeds.map((f) => f.slug))), site: u.origin + u.pathname };
+      try { await writeConfig([...feeds, entry], sha, `Add ${u.hostname.replace(/^www\./, "")} feed`); return { added: entry }; }
+      catch (e) { if (e.status === 409 && attempt === 0) continue; throw e; } // someone else changed the file; re-read once
+    }
+  }
+  async function removeFeed(slug) {
+    for (let attempt = 0; ; attempt++) {
+      const { sha, feeds } = await readConfig();
+      const next = feeds.filter((f) => f.slug !== slug);
+      if (next.length === feeds.length) return;
+      try { await writeConfig(next, sha, `Remove ${slug} feed`); return; }
+      catch (e) { if (e.status === 409 && attempt === 0) continue; throw e; }
     }
   }
 
-  // Wait for GitHub Pages to serve the new feed.
-  async function waitForFeed(file) {
+  // Wait for the build to report on a feed, then read the finished file.
+  async function waitForBuild(slug, file) {
     const started = Date.now();
     while (Date.now() - started < 4 * 60 * 1000) {
       await sleep(8000);
       try {
+        const list = await getJson(`${PAGES}feeds.json?t=${Date.now()}`, { cache: "no-store" });
+        const row = list.find((f) => f.slug === slug);
+        if (!row) continue;
+        if (row.status === "failed") return { row };
         const res = await fetch(`${PAGES}${file}?t=${Date.now()}`, { cache: "no-store" });
-        if (res.ok) {
-          const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
-          const items = xml.querySelectorAll("item");
-          if (!xml.querySelector("parsererror") && items.length) return { count: items.length };
-        }
+        if (!res.ok) continue;
+        const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
+        const items = xml.querySelectorAll("item");
+        if (xml.querySelector("parsererror") || !items.length) continue;
+        published = list; renderFeeds();
+        return { row, count: items.length, newest: items[0].querySelector("title")?.textContent || "", date: items[0].querySelector("pubDate")?.textContent || "" };
       } catch {}
     }
     return null;
+  }
+
+  function notWordPressMsg(u) {
+    return [
+      "This doesn't look like a WordPress site, or the site blocks its API, so Feed Maker can't build from it. Try ",
+      link(`${u.origin}/feed`, `${u.origin}/feed`),
+      " in your reader first. If that fails, a scraper such as ", link("https://rss.app", "RSS.app"), " can make one from the page.",
+    ];
   }
 
   // ---------- Main flow ----------
@@ -429,68 +429,57 @@ footer a { color: var(--muted); }
     if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
     let u;
     try { u = new URL(raw); } catch { R.reset(); R.show(); R.title("That doesn't look like a web address"); R.pill("error", "Check link"); R.msg("Paste the full link, for example https://tympanus.net/codrops/"); return; }
+    const host = u.hostname.replace(/^www\./, "");
 
-    busy = true; $("go").disabled = true; $("go").textContent = "Checking…";
-    R.reset(); R.show(); R.title(u.hostname.replace(/^www\./, "")); R.pill("working", "Checking site");
+    R.reset(); R.show(); R.title(host);
+    const direct = knownFeed(u);
+    if (direct) {
+      R.pill("live", "Has its own feed"); R.url(direct);
+      R.msg("This platform publishes its own feed, so there's nothing to build. Copy this into your reader.");
+      return;
+    }
+    const mine = findCovering(published, u.href);
+    if (mine) {
+      R.title(mine.name); R.pill("live", "Already yours"); R.url(PAGES + mine.file);
+      if (mine.items) R.meta([["Items", String(mine.items)]]);
+      return;
+    }
+    if (!token) {
+      R.pill("working", "Connect GitHub");
+      R.msg("Connect GitHub below to add this site. You only need to do it once.");
+      $("conn").open = true;
+      return;
+    }
+
+    busy = true; $("go").disabled = true; $("go").textContent = "Adding…";
+    R.pill("working", "Adding to repo");
     try {
-      const direct = knownFeed(u);
-      if (direct) {
-        R.pill("live", "Has its own feed"); R.url(direct);
-        R.msg("This platform publishes its own feed, so there's nothing to build. Copy this into your reader.");
-        return;
-      }
-
-      const wp = await findWordPress(u);
-      if (!wp) {
-        R.pill("error", "Can't build");
-        R.msg([
-          "This doesn't look like a WordPress site, or its API is switched off, so Feed Maker can't build from it. Try ",
-          link(`${u.origin}/feed`, `${u.origin}/feed`),
-          " in your reader first. If that fails, a scraper such as ", link("https://rss.app", "RSS.app"), " can make one from the page.",
-        ]);
-        return;
-      }
-
-      R.title(wp.name);
-      const latest = [["Latest post", `${decodeHtml(wp.latest.title.rendered)} · ${fmtDate(wp.latest.date_gmt + "Z")}`]];
-
-      const already = published.find((f) => normSite(f.site) === normSite(wp.base));
-      if (already) {
-        R.pill("live", "Already yours"); R.url(PAGES + already.file); R.meta(latest);
-        return;
-      }
-
-      if (!token) {
-        R.pill("working", "Ready to add"); R.meta(latest);
-        R.msg("This site works. Connect GitHub below to add it, then press Make feed again.");
-        $("conn").open = true;
-        return;
-      }
-
-      $("go").textContent = "Adding…";
-      R.pill("working", "Adding to repo");
-      const out = await addFeed({ name: wp.name, site: wp.base });
+      const out = await addFeed(u);
       if (out.existing) {
-        const file = out.existing.output || `${out.existing.slug}.xml`;
-        R.pill("live", "Already yours"); R.url(PAGES + file); R.meta(latest);
+        R.pill("live", "Already yours"); R.url(PAGES + (out.existing.output || `${out.existing.slug}.xml`));
         return;
       }
-
-      const file = `${out.added.slug}.xml`;
-      R.url(PAGES + file); R.meta(latest); R.pill("building", "Building");
-      R.msg("You can copy the link now. It starts working in about a minute.");
-      renderFeeds([{ name: wp.name, site: wp.base, file, pending: true }]);
+      const { slug } = out.added; const file = `${slug}.xml`;
+      R.url(PAGES + file); R.pill("building", "Building");
+      R.msg("You can copy the link now. The build takes about a minute and checks the site is WordPress.");
+      renderFeeds([{ slug, name: host, site: out.added.site, file, status: "building" }]);
       $("go").textContent = "Building…";
 
-      const live = await waitForFeed(file);
-      if (live) {
-        R.pill("live", "Live");
-        R.meta([...latest, ["Items", String(live.count)]]);
-        R.msg("Ready. Paste the link into your reader.");
-        loadFeeds();
-      } else {
+      const result = await waitForBuild(slug, file);
+      if (!result) {
         R.pill("building", "Still building");
         R.msg(["This is taking longer than usual. The link will work once the build finishes. ", link(`https://github.com/${OWNER}/${REPO}/actions`, "Check the build")]);
+      } else if (result.row.status === "failed") {
+        R.url(""); R.pill("error", "Can't build");
+        R.msg(result.row.code === "not_wordpress" ? notWordPressMsg(u) : [`The build couldn't make this feed: ${result.row.error}.`]);
+        await removeFeed(slug).catch(() => {});
+        published = published.filter((f) => f.slug !== slug); renderFeeds();
+      } else {
+        R.title(result.row.name); R.pill("live", "Live");
+        const meta = [["Items", String(result.count)]];
+        if (result.newest) meta.unshift(["Latest post", `${result.newest}${result.date ? " · " + fmtDate(result.date) : ""}`]);
+        R.meta(meta);
+        R.msg("Ready. Paste the link into your reader.");
       }
     } catch (err) {
       R.pill("error", "Didn't work");
