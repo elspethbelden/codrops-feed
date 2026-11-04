@@ -1,4 +1,513 @@
 <!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Feed Maker</title>
-<p>Setting up…</p>
-<script>console.log(1)</script>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #16202b;
+  --muted: #5d6b7a;
+  --line: #dde2e8;
+  --accent: #d9541a;        --accent-fg: #ffffff;
+  --accent-soft: #fbe9e0;
+  --ok: #1f7a4d;
+  --ok-soft: #e1f2e8;
+  --warn: #8a5a00;
+  --warn-soft: #fbf0d6;
+  --bad: #b3261e;
+  --bad-soft: #fbe3e1;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --surface: #17202a; --fg: #e8edf2; --muted: #93a1b0; --line: #2a3644;
+    --accent: #f0743a; --accent-fg: #1a0c04; --accent-soft: #3a2116;
+    --ok: #5fcf95; --ok-soft: #14301f; --warn: #e8b94f; --warn-soft: #33290f; --bad: #f08a83; --bad-soft: #3a1917;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --surface: #17202a; --fg: #e8edf2; --muted: #93a1b0; --line: #2a3644;
+  --accent: #f0743a; --accent-fg: #1a0c04; --accent-soft: #3a2116;
+  --ok: #5fcf95; --ok-soft: #14301f; --warn: #e8b94f; --warn-soft: #33290f; --bad: #f08a83; --bad-soft: #3a1917;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 16px/1.55 var(--body);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding-block: 56px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 40px;
+}
+[hidden] { display: none !important; }
+
+.mast { display: grid; gap: 12px; }
+.brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 600 13px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.brand svg { width: 18px; height: 18px; color: var(--accent); }
+h1 {
+  margin: 0;
+  font: 700 clamp(34px, 6.4vw, 52px)/1.02 var(--display);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.lede { margin: 0; color: var(--muted); max-width: 52ch; }
+
+form { display: grid; gap: 10px; }
+label.small { font: 600 13px/1 var(--body); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input[type="url"], input[type="password"] {
+  flex: 1 1 280px; min-width: 0;
+  font: 400 16px/1.3 var(--mono);
+  color: var(--fg); background: var(--surface);
+  border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 14px 16px;
+}
+input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+input[type="url"]:focus { border-color: var(--accent); }
+button {
+  font: 600 15px/1 var(--body); cursor: pointer;
+  border-radius: 10px; padding: 14px 20px; border: 1.5px solid transparent;
+}
+.primary { background: var(--accent); color: var(--accent-fg); }
+.primary:hover { filter: brightness(1.06); }
+.primary:disabled { opacity: .6; cursor: progress; }
+.ghost { background: transparent; color: var(--fg); border-color: var(--line); padding: 10px 14px; font-size: 14px; }
+.ghost:hover { border-color: var(--muted); }
+.hint { margin: 0; font-size: 14px; color: var(--muted); }
+.hint button.link { all: unset; color: var(--fg); text-decoration: underline; cursor: pointer; }
+
+.result {
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: 14px;
+  padding: 20px; display: grid; gap: 14px;
+}
+.result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.result-title { margin: 0; font: 600 18px/1.3 var(--display); min-width: 0; overflow-wrap: anywhere; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 600 12px/1 var(--body); letter-spacing: .04em; text-transform: uppercase;
+  padding: 6px 10px; border-radius: 99px; white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.live { color: var(--ok); background: var(--ok-soft); }
+.pill.building { color: var(--warn); background: var(--warn-soft); }
+.pill.building::before { animation: pulse 1.2s ease-in-out infinite; }
+.pill.error { color: var(--bad); background: var(--bad-soft); }
+.pill.working { color: var(--muted); background: color-mix(in srgb, var(--line) 60%, transparent); }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .pill.building::before { animation: none; } }
+
+.urlbox { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.url {
+  flex: 1 1 260px; min-width: 0;
+  font: 500 15px/1.4 var(--mono);
+  background: var(--accent-soft); color: var(--fg);
+  border-radius: 10px; padding: 12px 14px;
+  overflow-wrap: anywhere; user-select: all;
+}
+.copy { min-width: 96px; }
+.meta { margin: 0; font-size: 14px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.meta b { color: var(--fg); font-weight: 500; }
+.msg { margin: 0; font-size: 15px; }
+.msg a { color: var(--fg); }
+
+section h2 { margin: 0 0 12px; font: 600 13px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.feeds { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.feeds li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid var(--line);
+}
+.feeds .name { font-weight: 600; }
+.feeds .file { grid-column: 1; font: 400 13px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.feeds .ghost { grid-row: 1 / span 2; grid-column: 2; }
+.feeds .stale { font: 600 11px/1 var(--body); letter-spacing: .04em; text-transform: uppercase; color: var(--warn); margin-left: 8px; }
+.empty { color: var(--muted); font-size: 15px; margin: 0; padding: 14px 0; border-bottom: 1px solid var(--line); }
+
+details { border-top: 1px solid var(--line); padding-top: 20px; }
+summary { cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 10px; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; margin-left: auto; color: var(--muted); font: 400 20px/1 var(--body); }
+details[open] summary::after { content: "−"; }
+.conn { display: grid; gap: 14px; padding-top: 16px; }
+.conn ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--muted); font-size: 15px; }
+.conn ol b { color: var(--fg); font-weight: 600; }
+.conn a { color: var(--fg); }
+footer { font-size: 13px; color: var(--muted); }
+footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <span class="brand">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="6" cy="18" r="2.2" fill="currentColor"/><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      Feed Maker
+    </span>
+    <h1>Paste a site. Get a feed.</h1>
+    <p class="lede">Works with any WordPress site, even when its own feed is broken. Feeds rebuild every hour from the site's API.</p>
+  </header>
+
+  <form id="form" novalidate>
+    <label class="small" for="site">Site or page link</label>
+    <div class="row">
+      <input id="site" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://tympanus.net/codrops/all-posts/" required>
+      <button id="go" class="primary" type="submit">Make feed</button>
+    </div>
+    <p class="hint" id="connHint" hidden>Connect GitHub once to add new feeds. <button type="button" class="link" id="openConn">Connect</button></p>
+  </form>
+
+  <div class="result" id="result" hidden aria-live="polite">
+    <div class="result-head">
+      <p class="result-title" id="rTitle"></p>
+      <span class="pill" id="rPill"></span>
+    </div>
+    <div class="urlbox" id="rUrlBox" hidden>
+      <div class="url" id="rUrl"></div>
+      <button class="ghost copy" id="rCopy" type="button">Copy</button>
+    </div>
+    <p class="meta" id="rMeta" hidden></p>
+    <p class="msg" id="rMsg" hidden></p>
+  </div>
+
+  <section>
+    <h2>Your feeds</h2>
+    <ul class="feeds" id="feeds"><li class="empty">Loading your feeds…</li></ul>
+  </section>
+
+  <details id="conn">
+    <summary><span id="connLabel">Connect GitHub</span><span class="pill" id="connPill" hidden></span></summary>
+    <div class="conn">
+      <ol>
+        <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub › new fine-grained token</a>.</li>
+        <li>Under <b>Repository access</b>, choose <b>Only select repositories</b> and pick <b id="repoName">codrops-feed</b>.</li>
+        <li>Under <b>Permissions › Repository › Contents</b>, choose <b>Read and write</b>. Nothing else is needed.</li>
+        <li>Generate it and paste it below. It's saved in this browser only.</li>
+      </ol>
+      <div class="row">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+        <button class="ghost" id="saveToken" type="button">Save</button>
+        <button class="ghost" id="clearToken" type="button" hidden>Disconnect</button>
+      </div>
+      <p class="hint" id="connMsg" hidden></p>
+    </div>
+  </details>
+
+  <footer>
+    Feeds live in <a id="repoLink" href="#" target="_blank" rel="noopener">the codrops-feed repo</a>. Builds run in <a id="actionsLink" href="#" target="_blank" rel="noopener">Actions</a>.
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- Where this page lives ----------
+  const onPages = location.hostname.endsWith(".github.io");
+  const OWNER = onPages ? location.hostname.split(".")[0] : "elspethbelden";
+  const REPO = (onPages && location.pathname.split("/").filter(Boolean)[0]) || "codrops-feed";
+  const PAGES = `https://${OWNER}.github.io/${REPO}/`;
+  const API = `https://api.github.com/repos/${OWNER}/${REPO}`;
+  const TOKEN_KEY = "feedmaker.token";
+
+  const $ = (id) => document.getElementById(id);
+  $("repoName").textContent = REPO;
+  $("repoLink").href = `https://github.com/${OWNER}/${REPO}`;
+  $("repoLink").textContent = `the ${REPO} repo`;
+  $("actionsLink").href = `https://github.com/${OWNER}/${REPO}/actions`;
+
+  // ---------- Small helpers ----------
+  const store = {
+    get() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } },
+    set(v) { try { localStorage.setItem(TOKEN_KEY, v); } catch {} },
+    clear() { try { localStorage.removeItem(TOKEN_KEY); } catch {} },
+  };
+  let token = store.get();
+
+  const decodeHtml = (s = "") => { const t = document.createElement("textarea"); t.innerHTML = s; return t.value; };
+  const normSite = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+  const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const b64encode = (s) => { const b = new TextEncoder().encode(s); let bin = ""; b.forEach((x) => (bin += String.fromCharCode(x))); return btoa(bin); };
+  const b64decode = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function getJson(url, opts) {
+    const res = await fetch(url, opts);
+    if (!res.ok) { const e = new Error(`${res.status}`); e.status = res.status; throw e; }
+    return res.json();
+  }
+
+  async function copyText(text, btn) {
+    try { await navigator.clipboard.writeText(text); }
+    catch {
+      const sel = window.getSelection(); const range = document.createRange();
+      const node = btn.previousElementSibling || btn; range.selectNodeContents(node);
+      sel.removeAllRanges(); sel.addRange(range); document.execCommand && document.execCommand("copy");
+    }
+    const old = btn.textContent; btn.textContent = "Copied"; setTimeout(() => (btn.textContent = old), 1600);
+  }
+
+  // ---------- Result card ----------
+  const R = {
+    show() { $("result").hidden = false; },
+    title(t) { $("rTitle").textContent = t; },
+    pill(kind, text) { const p = $("rPill"); p.className = `pill ${kind}`; p.textContent = text; p.hidden = !kind; },
+    url(u) { $("rUrlBox").hidden = !u; $("rUrl").textContent = u || ""; },
+    meta(parts) {
+      const m = $("rMeta"); m.replaceChildren();
+      (parts || []).forEach(([k, v]) => { const s = document.createElement("span"); s.append(`${k} `); const b = document.createElement("b"); b.textContent = v; s.append(b); m.append(s); });
+      m.hidden = !(parts && parts.length);
+    },
+    msg(nodes) { const m = $("rMsg"); m.replaceChildren(...(nodes ? [].concat(nodes) : [])); m.hidden = !nodes; },
+    reset() { this.title(""); this.pill("", ""); this.url(""); this.meta(null); this.msg(null); },
+  };
+  $("rCopy").addEventListener("click", (e) => copyText($("rUrl").textContent, e.currentTarget));
+  const link = (href, text) => { const a = document.createElement("a"); a.href = href; a.target = "_blank"; a.rel = "noopener"; a.textContent = text; return a; };
+
+  // ---------- Feed list (published by the build) ----------
+  let published = [];
+  async function loadFeeds() {
+    const ul = $("feeds");
+    try { published = await getJson(`${PAGES}feeds.json?t=${Date.now()}`, { cache: "no-store" }); }
+    catch { published = []; }
+    renderFeeds();
+  }
+  function renderFeeds(extra = []) {
+    const ul = $("feeds"); ul.replaceChildren();
+    const all = [...published, ...extra.filter((x) => !published.some((p) => p.file === x.file))];
+    if (!all.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "No feeds yet. Paste a site above to make the first one."; ul.append(li); return; }
+    all.forEach((f) => {
+      const li = document.createElement("li");
+      const name = document.createElement("span"); name.className = "name"; name.textContent = f.name;
+      if (f.fresh === false) { const s = document.createElement("span"); s.className = "stale"; s.textContent = "Site unreachable, showing last copy"; name.append(s); }
+      if (f.pending) { const s = document.createElement("span"); s.className = "stale"; s.textContent = "Building"; name.append(s); }
+      const file = document.createElement("span"); file.className = "file"; file.textContent = PAGES + f.file;
+      const btn = document.createElement("button"); btn.type = "button"; btn.className = "ghost"; btn.textContent = "Copy";
+      btn.addEventListener("click", () => copyText(PAGES + f.file, btn));
+      li.append(name, file, btn); ul.append(li);
+    });
+  }
+
+  // ---------- GitHub connection ----------
+  function renderConn(state, message) {
+    const ok = state === "ok";
+    $("connLabel").textContent = ok ? "GitHub connected" : "Connect GitHub";
+    $("connPill").hidden = !ok; $("connPill").className = "pill live"; $("connPill").textContent = "Ready";
+    $("clearToken").hidden = !token; $("connHint").hidden = !!token;
+    $("connMsg").hidden = !message; $("connMsg").textContent = message || "";
+  }
+  async function checkToken() {
+    if (!token) return renderConn("none");
+    try {
+      const repo = await getJson(API, { headers: gh() });
+      renderConn("ok", `Connected to ${repo.full_name}.`);
+    } catch (e) {
+      renderConn("bad", e.status === 401 ? "GitHub didn't accept that token. Check it was copied in full, or make a new one." : e.status === 404 ? `That token can't see ${OWNER}/${REPO}. Give it access to this repository.` : "Couldn't reach GitHub. Try again in a moment.");
+    }
+  }
+  const gh = () => ({ Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" });
+  $("saveToken").addEventListener("click", () => { token = $("token").value.trim(); $("token").value = ""; if (!token) return; store.set(token); checkToken(); });
+  $("clearToken").addEventListener("click", () => { token = ""; store.clear(); renderConn("none", "Disconnected. The token is removed from this browser; delete it on GitHub too if you no longer need it."); });
+  $("openConn").addEventListener("click", () => { $("conn").open = true; $("token").focus(); });
+
+  // ---------- Site detection ----------
+  // Platforms that already publish a feed at a predictable address.
+  function knownFeed(u) {
+    const h = u.hostname.replace(/^www\./, "");
+    if (h.endsWith("substack.com")) return `${u.origin}/feed`;
+    if (h === "medium.com") { const user = u.pathname.split("/").find((p) => p.startsWith("@")); if (user) return `https://medium.com/feed/${user}`; }
+    if (h.endsWith(".medium.com")) return `${u.origin}/feed`;
+    if (h.endsWith(".blogspot.com")) return `${u.origin}/feeds/posts/default`;
+    return null;
+  }
+
+  // Walk up the pasted path until a WordPress API answers. Deepest first, so sub-sites like /codrops win.
+  async function findWordPress(u) {
+    const parts = u.pathname.split("/").filter(Boolean).slice(0, 4);
+    const bases = [];
+    for (let i = parts.length; i >= 0; i--) bases.push(u.origin + (i ? "/" + parts.slice(0, i).join("/") : ""));
+    for (const base of bases) {
+      for (const route of ["/wp-json/", "/?rest_route=/"]) {
+        try {
+          const root = await getJson(base + route, { headers: { Accept: "application/json" } });
+          if (Array.isArray(root.namespaces) && root.namespaces.includes("wp/v2")) {
+            const postsUrl = route === "/wp-json/" ? `${base}/wp-json/wp/v2/posts?per_page=1&_fields=title,date_gmt,link` : `${base}/?rest_route=/wp/v2/posts&per_page=1&_fields=title,date_gmt,link`;
+            let latest = null;
+            try { const p = await getJson(postsUrl); latest = p[0] || null; } catch {}
+            if (!latest) continue; // API answers but posts are hidden: not usable
+            return { base, name: decodeHtml(root.name || u.hostname).trim() || u.hostname, latest };
+          }
+        } catch {}
+      }
+    }
+    return null;
+  }
+
+  function makeSlug(base, name, taken) {
+    const u = new URL(base);
+    const last = u.pathname.split("/").filter(Boolean).pop();
+    const fromHost = u.hostname.replace(/^(www|blog|news)\./, "").split(".")[0];
+    let slug = (last || fromHost || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "feed";
+    let s = slug, n = 2;
+    while (taken.has(s)) s = `${slug}-${n++}`;
+    return s;
+  }
+
+  // ---------- Repo edits ----------
+  async function readConfig() {
+    const file = await getJson(`${API}/contents/feeds.json?ref=main`, { headers: gh(), cache: "no-store" });
+    return { sha: file.sha, feeds: JSON.parse(b64decode(file.content)) };
+  }
+  async function addFeed(entry) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { sha, feeds } = await readConfig();
+      const existing = feeds.find((f) => normSite(f.site) === normSite(entry.site));
+      if (existing) return { existing };
+      const taken = new Set(feeds.map((f) => f.slug));
+      entry.slug = makeSlug(entry.site, entry.name, taken);
+      feeds.push(entry);
+      const res = await fetch(`${API}/contents/feeds.json`, {
+        method: "PUT", headers: { ...gh(), "Content-Type": "application/json" },
+        body: JSON.stringify({ message: `Add ${entry.name} feed`, content: b64encode(JSON.stringify(feeds, null, 2) + "\n"), sha, branch: "main" }),
+      });
+      if (res.ok) return { added: entry };
+      if (res.status === 409 && attempt === 0) continue; // someone else changed the file; re-read and retry once
+      const e = new Error(String(res.status)); e.status = res.status; throw e;
+    }
+  }
+
+  // Wait for GitHub Pages to serve the new feed.
+  async function waitForFeed(file) {
+    const started = Date.now();
+    while (Date.now() - started < 4 * 60 * 1000) {
+      await sleep(8000);
+      try {
+        const res = await fetch(`${PAGES}${file}?t=${Date.now()}`, { cache: "no-store" });
+        if (res.ok) {
+          const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
+          const items = xml.querySelectorAll("item");
+          if (!xml.querySelector("parsererror") && items.length) return { count: items.length };
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  // ---------- Main flow ----------
+  let busy = false;
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    let raw = $("site").value.trim();
+    if (!raw) { $("site").focus(); return; }
+    if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+    let u;
+    try { u = new URL(raw); } catch { R.reset(); R.show(); R.title("That doesn't look like a web address"); R.pill("error", "Check link"); R.msg("Paste the full link, for example https://tympanus.net/codrops/"); return; }
+
+    busy = true; $("go").disabled = true; $("go").textContent = "Checking…";
+    R.reset(); R.show(); R.title(u.hostname.replace(/^www\./, "")); R.pill("working", "Checking site");
+    try {
+      const direct = knownFeed(u);
+      if (direct) {
+        R.pill("live", "Has its own feed"); R.url(direct);
+        R.msg("This platform publishes its own feed, so there's nothing to build. Copy this into your reader.");
+        return;
+      }
+
+      const wp = await findWordPress(u);
+      if (!wp) {
+        R.pill("error", "Can't build");
+        R.msg([
+          "This doesn't look like a WordPress site, or its API is switched off, so Feed Maker can't build from it. Try ",
+          link(`${u.origin}/feed`, `${u.origin}/feed`),
+          " in your reader first. If that fails, a scraper such as ", link("https://rss.app", "RSS.app"), " can make one from the page.",
+        ]);
+        return;
+      }
+
+      R.title(wp.name);
+      const latest = [["Latest post", `${decodeHtml(wp.latest.title.rendered)} · ${fmtDate(wp.latest.date_gmt + "Z")}`]];
+
+      const already = published.find((f) => normSite(f.site) === normSite(wp.base));
+      if (already) {
+        R.pill("live", "Already yours"); R.url(PAGES + already.file); R.meta(latest);
+        return;
+      }
+
+      if (!token) {
+        R.pill("working", "Ready to add"); R.meta(latest);
+        R.msg("This site works. Connect GitHub below to add it, then press Make feed again.");
+        $("conn").open = true;
+        return;
+      }
+
+      $("go").textContent = "Adding…";
+      R.pill("working", "Adding to repo");
+      const out = await addFeed({ name: wp.name, site: wp.base });
+      if (out.existing) {
+        const file = out.existing.output || `${out.existing.slug}.xml`;
+        R.pill("live", "Already yours"); R.url(PAGES + file); R.meta(latest);
+        return;
+      }
+
+      const file = `${out.added.slug}.xml`;
+      R.url(PAGES + file); R.meta(latest); R.pill("building", "Building");
+      R.msg("You can copy the link now. It starts working in about a minute.");
+      renderFeeds([{ name: wp.name, site: wp.base, file, pending: true }]);
+      $("go").textContent = "Building…";
+
+      const live = await waitForFeed(file);
+      if (live) {
+        R.pill("live", "Live");
+        R.meta([...latest, ["Items", String(live.count)]]);
+        R.msg("Ready. Paste the link into your reader.");
+        loadFeeds();
+      } else {
+        R.pill("building", "Still building");
+        R.msg(["This is taking longer than usual. The link will work once the build finishes. ", link(`https://github.com/${OWNER}/${REPO}/actions`, "Check the build")]);
+      }
+    } catch (err) {
+      R.pill("error", "Didn't work");
+      const s = err && err.status;
+      R.msg(
+        s === 401 ? "GitHub didn't accept your token. Reconnect GitHub below." :
+        s === 403 || s === 404 ? `Your token can't edit ${OWNER}/${REPO}. Make sure it has Contents set to Read and write for this repository.` :
+        "Something went wrong talking to GitHub. Try again in a moment."
+      );
+    } finally {
+      busy = false; $("go").disabled = false; $("go").textContent = "Make feed";
+    }
+  });
+
+  loadFeeds();
+  checkToken();
+})();
+</script>
+</body>
+</html>
