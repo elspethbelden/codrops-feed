@@ -4,9 +4,5 @@
     "name": "Codrops",
     "site": "https://tympanus.net/codrops",
     "output": "feed.xml"
-  },
-  {
-    "slug": "recent",
-    "site": "https://recent.design/feed"
   }
 ]
